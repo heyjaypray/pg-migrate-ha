@@ -1,12 +1,18 @@
-# ---- Dockerfile ----
-    FROM alpine:3.19
+FROM ubuntu:jammy
 
-    # tools the script needs: bash, pg_dump/pg_restore, gzip & curl
-    RUN apk add --no-cache bash postgresql-client gzip curl
-    
-    WORKDIR /app
-    COPY script/ ./script/
-    
-    # the template’s logic lives in script/migrate.sh
-    ENTRYPOINT ["bash", "./script/migrate.sh"]
-    
+RUN apt-get update && \
+    apt-get install -y gnupg wget curl && \
+    wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - && \
+    echo "deb http://apt.postgresql.org/pub/repos/apt/ $(grep UBUNTU_CODENAME /etc/os-release | cut -d= -f2)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+
+RUN apt-get update && \
+    apt-get install -y postgresql-client-16 bash ncurses-bin && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+ADD . .
+
+RUN chmod +x entry.sh sync_data.sh setup_replication.sh
+
+CMD ["bash", "entry.sh"]
