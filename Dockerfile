@@ -8,5 +8,5 @@
     COPY script/ ./script/
     
     # the template’s logic lives in script/migrate.sh
-    ENTRYPOINT ["bash", "/script/migrate.sh"]
+    ENTRYPOINT ["bash", "./script/migrate.sh"]
     
