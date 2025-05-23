@@ -5,31 +5,32 @@ source ./logging.sh
 write_info "Setting up replication"
 
 restart_service() {
-  write_info "Redeploying Standalone Postgres to apply WAL"
-  local environment_id="$ENVIRONMENT_ID"
-  local service_id="$STANDALONE_SERVICE_ID"
-  local api_token="$RAILWAWY_API_TOKEN"
-
-  local response=$(curl -s -w "%{http_code}" -o /tmp/curl_output.txt -X POST "https://backboard.railway.app/graphql/v2" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $api_token" \
-    --data "{\"query\":\"mutation serviceInstanceRedeploy(\$environmentId: String!, \$serviceId: String!) { serviceInstanceRedeploy(environmentId: \$environmentId, serviceId: \$serviceId) }\",\"variables\":{\"environmentId\":\"$environment_id\",\"serviceId\":\"$service_id\"}}")
-
-  local http_code=$(tail -n1 <<< "$response")
-
-  if [[ "$http_code" -ne 200 ]]; then
-    write_error "Failed to restart service. HTTP status code: $http_code"
-    write_error "Response: $(cat /tmp/curl_output.txt)"
-    error_exit "API call to restart service failed."
-  else
-    write_ok "Redeploy request sent to the API."
-  fi
-
+  write_info "Redeploying Stand-alone Postgres to apply WAL"
+  local body http_code
+  read -r body http_code < <(
+    curl -s -w "\n%{http_code}" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${RAILWAY_API_TOKEN}" \
+      -X POST https://backboard.railway.app/graphql/v2 \
+      --data "{\"query\":\"mutation serviceInstanceRedeploy(\$environmentId: String!, \$serviceId: String!) { serviceInstanceRedeploy(environmentId: \$environmentId, serviceId: \$serviceId) }\",\"variables\":{\"environmentId\":\"${ENVIRONMENT_ID}\",\"serviceId\":\"${STANDALONE_SERVICE_ID}\"}}"
+  )
+  [[ $http_code == 200 && $body != *'"errors":'* ]] \
+    || error_exit "API restart failed: $body"
+  write_ok "Redeploy request accepted."
 }
 
 set_wal_level_logical() {
-  write_info "Setting wal_level to logical"
-  psql "$STANDALONE_URL" -c "ALTER SYSTEM SET wal_level = 'logical';" || error_exit "Failed to set wal_level to logical."
+  psql "$STANDALONE_URL" -c "ALTER SYSTEM SET wal_level = 'logical';"
+}
+
+wait_for_logical() {
+  write_info "Waiting for wal_level to switch to logical…"
+  for _ in {1..20}; do
+    level=$(psql "$STANDALONE_URL" -t -A -c "SHOW wal_level;" 2>/dev/null)
+    [[ $level == logical ]] && { write_ok "wal_level=logical"; return; }
+    sleep 15
+  done
+  error_exit "wal_level never became logical"
 }
 
 create_publication() {
@@ -58,9 +59,9 @@ create_subscription() {
 
 set_wal_level_logical
 restart_service
+wait_for_logical
 
-write_info "Wait 30s for the standalone instance to redeploy."
-sleep 30
+
 
 databases=$(psql -d "$STANDALONE_URL" -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;")
 
